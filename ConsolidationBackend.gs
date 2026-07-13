@@ -19,14 +19,26 @@ var SHEET_NAME = "FirstTimers";
 var LEADERS_SHEET_NAME = "Leaders";
 var NOTIF_SHEET_NAME = "Notifications";
 
-// ── Semaphore SMS API (https://semaphore.co) — sends real SMS to PH numbers
-// and reports back delivery status. Sign up at semaphore.co, copy your API
-// key from the dashboard, and paste it below. Leave SEMAPHORE_SENDER_NAME
-// blank to send under Semaphore's shared default name until you register
-// your own custom sender name in their dashboard.
-var SEMAPHORE_API_KEY = "491adbfaa174c76c4772008c171d7d6c";
-var SEMAPHORE_SENDER_NAME = "";
-var SEMAPHORE_BASE = "https://api.semaphore.co/api/v4";
+// ── SMS Gateway for Android (https://sms-gate.app) — FREE, no per-message
+// cost. Turns your own Android phone into the SMS sender:
+//   1. Install "SMS Gateway for Android" (SMSGate) on the phone that has
+//      your SIM (09305920971) in it. Get it from sms-gate.app or the
+//      GitHub releases page (capcom6/android-sms-gateway).
+//   2. Open the app, leave it on "Cloud Server" mode (default), and copy
+//      the Username / Password shown on the Home tab.
+//   3. Paste them into SMSGATE_USERNAME / SMSGATE_PASSWORD below.
+//   4. Keep the app running in the background on that phone — it has to
+//      be online (connected to the internet) for messages to go out,
+//      since each send is relayed to it through SMSGate's free cloud relay.
+// Recipients will see 09305920971 as the sender (regular SMS can't show a
+// custom name) — that's why the message text itself signs off as
+// "TRCF Consolidation TEAM" (see buildReminderMessage in App.jsx).
+var SMSGATE_USERNAME = "K9MIDA";
+var SMSGATE_PASSWORD = "mlsies3ghgbztq";
+var SMSGATE_BASE = "https://api.sms-gate.app/3rdparty/v1";
+// Default country code used to expand local "09XXXXXXXXX" numbers to the
+// E.164 format (+63XXXXXXXXXX) the SMSGate API requires.
+var DEFAULT_COUNTRY_CODE = "63";
 
 var COLUMNS = [
   "ID","Name","ContactNumber","Address","Age","Gender","MaritalStatus",
@@ -165,27 +177,55 @@ function readNotifications_() {
   return rows;
 }
 
-// Sends one SMS through Semaphore and returns its raw API response object
-// (contains message_id, status, network, etc.) — throws if the API key isn't
-// configured or Semaphore returns an error.
-function sendSemaphoreSms_(number, message) {
-  if (!SEMAPHORE_API_KEY || SEMAPHORE_API_KEY.indexOf("PASTE_YOUR") === 0) {
-    throw new Error("Semaphore API key isn't configured yet — paste it into SEMAPHORE_API_KEY in ConsolidationBackend.gs");
+// Converts a local PH mobile number ("09XXXXXXXXX", "9XXXXXXXXX", or already
+// "+63XXXXXXXXXX") into the E.164 format SMSGate's API requires.
+function toE164Ph_(number) {
+  var digits = String(number || "").replace(/[^\d+]/g, "");
+  if (digits.indexOf("+") === 0) return digits;
+  if (digits.indexOf("0") === 0) digits = digits.substring(1);
+  if (digits.indexOf(DEFAULT_COUNTRY_CODE) === 0) return "+" + digits;
+  return "+" + DEFAULT_COUNTRY_CODE + digits;
+}
+
+function smsGateAuthHeader_() {
+  return "Basic " + Utilities.base64Encode(SMSGATE_USERNAME + ":" + SMSGATE_PASSWORD);
+}
+
+// Sends one SMS through your own phone via SMS Gateway for Android (free —
+// no per-message API cost, just your normal carrier SMS rate) and returns
+// its raw API response (contains id, state, recipients, etc.) — throws if
+// the device credentials aren't configured or SMSGate returns an error
+// (most commonly because the phone/app is offline).
+function sendSmsGateSms_(number, message) {
+  if (!SMSGATE_USERNAME || SMSGATE_USERNAME.indexOf("PASTE_") === 0) {
+    throw new Error("SMSGate isn't configured yet — install the SMS Gateway for Android app on 09305920971, then paste its Username/Password into SMSGATE_USERNAME / SMSGATE_PASSWORD in ConsolidationBackend.gs");
   }
-  var payload = { apikey: SEMAPHORE_API_KEY, number: number, message: message };
-  if (SEMAPHORE_SENDER_NAME) payload.sendername = SEMAPHORE_SENDER_NAME;
-  var res = UrlFetchApp.fetch(SEMAPHORE_BASE + "/messages", {
+  var payload = {
+    textMessage: { text: message },
+    phoneNumbers: [toE164Ph_(number)],
+    withDeliveryReport: true
+  };
+  var res = UrlFetchApp.fetch(SMSGATE_BASE + "/messages", {
     method: "post",
-    payload: payload,
+    contentType: "application/json",
+    headers: { Authorization: smsGateAuthHeader_() },
+    payload: JSON.stringify(payload),
     muteHttpExceptions: true
   });
   var code = res.getResponseCode();
-  var body = JSON.parse(res.getContentText());
+  var text = res.getContentText();
+  var body;
+  try {
+    body = JSON.parse(text);
+  } catch (parseErr) {
+    throw new Error("SMSGate: " + text);
+  }
   if (code >= 300) {
-    var msg = (body && (body.message || JSON.stringify(body))) || ("Semaphore returned HTTP " + code);
+    var msg = (body && (body.message || body.error || JSON.stringify(body))) ||
+      ("SMSGate returned HTTP " + code + " — check that the phone has the app open and online.");
     throw new Error(msg);
   }
-  return Array.isArray(body) ? body[0] : body;
+  return body;
 }
 
 function sendNotification_(body) {
@@ -193,23 +233,26 @@ function sendNotification_(body) {
   if (!phone) return { success: false, error: "No phone number provided" };
   if (!message) return { success: false, error: "Message is empty" };
 
-  var result = sendSemaphoreSms_(phone, message);
+  var result = sendSmsGateSms_(phone, message);
   var sheet = getNotificationsSheet_();
   var id = String(Date.now());
   var sentAt = new Date().toISOString();
   var entry = {
     ID: id, LeaderId: leaderId, LeaderName: leaderName, Phone: phone, Message: message,
-    SemaphoreMessageId: result.message_id || "", Status: result.status || "Pending",
-    Network: result.network || "", SentAt: sentAt
+    // Reusing the old column names so existing sheets don't need re-setup:
+    // "SemaphoreMessageId" now holds the SMSGate message id, "Network" is
+    // left blank since SMSGate doesn't report a carrier network.
+    SemaphoreMessageId: result.id || "", Status: result.state || "Pending",
+    Network: "", SentAt: sentAt
   };
   var row = NOTIF_COLUMNS.map(function (c) { return entry[c]; });
   sheet.appendRow(row);
   return { success: true, notification: entry };
 }
 
-// Re-queries Semaphore for a single message's current status (Pending →
-// Sent/Delivered/Failed) and updates the logged row in the Notifications
-// sheet to match.
+// Re-queries SMSGate for a single message's current status (Pending →
+// Processed → Sent → Delivered, or Failed) and updates the logged row in
+// the Notifications sheet to match.
 function refreshNotificationStatus_(notifId) {
   var sheet = getNotificationsSheet_();
   var values = sheet.getDataRange().getValues();
@@ -220,14 +263,19 @@ function refreshNotificationStatus_(notifId) {
   for (var i = 1; i < values.length; i++) {
     if (String(values[i][idCol]) === String(notifId)) {
       var messageId = values[i][msgIdCol];
-      if (!messageId) return { success: false, error: "No Semaphore message id logged for this notification" };
+      if (!messageId) return { success: false, error: "No SMSGate message id logged for this notification" };
       var res = UrlFetchApp.fetch(
-        SEMAPHORE_BASE + "/messages/" + messageId + "?apikey=" + encodeURIComponent(SEMAPHORE_API_KEY),
-        { method: "get", muteHttpExceptions: true }
+        SMSGATE_BASE + "/messages/" + messageId,
+        { method: "get", headers: { Authorization: smsGateAuthHeader_() }, muteHttpExceptions: true }
       );
-      var body = JSON.parse(res.getContentText());
-      var msg = Array.isArray(body) ? body[0] : body;
-      var status = (msg && msg.status) || "Unknown";
+      var text = res.getContentText();
+      var body;
+      try {
+        body = JSON.parse(text);
+      } catch (parseErr) {
+        return { success: false, error: "SMSGate: " + text };
+      }
+      var status = (body && body.state) || "Unknown";
       sheet.getRange(i + 1, statusCol + 1).setValue(status);
       return { success: true, status: status };
     }

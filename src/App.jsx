@@ -56,9 +56,9 @@ const ASSIGNABLE_LEADERS = NETWORKS.reduce((acc, n) => {
 function buildReminderMessage(leader, pendingCount) {
   const who = pendingCount === 1 ? "1 First Timer" : `${pendingCount} First Timers`;
   if (pendingCount > 0) {
-    return `Hi ${leader.name}! Reminder from TRCF Consolidation TEAM: you have ${who} waiting for follow-up. Please reach out when you can. Check the Consolidation System or Pastors' Overview for details. Thank you! 🙏`;
+    return `Hi ${leader.name}! Reminder from TRCF CONSOLIDATION TEAM: you have ${who} waiting for follow-up. Please reach out when you can. Check the Consolidation System or Pastors' Overview for details. Thank you! 🙏`;
   }
-  return `Hi ${leader.name}! This is TRCF Consolidation TEAM checking in — just a reminder to keep following up with your assigned First Timers. Thank you! 🙏`;
+  return `Hi ${leader.name}! This is TRCF CONSOLIDATION TEAM checking in — just a reminder to keep following up with your assigned First Timers. Thank you! 🙏`;
 }
 
 // Leader phone numbers now live in the "Leaders" tab of the Consolidation
@@ -264,7 +264,7 @@ function NotifyModal({ open, onClose, leader, pending, phone, saving, error, onS
             <div className={`notif-result ${meta.cls}`}>
               <meta.icon size={18}/>
               <div>
-                <div className="notif-result-status">Sent via Semaphore — status: {meta.label}</div>
+                <div className="notif-result-status">Sent from 09305920971 — status: {meta.label}</div>
                 <div className="notif-result-sub">{sendResult.Network ? `${sendResult.Network} · ` : ""}{formatDateTime(sendResult.SentAt)}</div>
               </div>
             </div>
@@ -367,8 +367,8 @@ function NetworkLeadersScreen({ records, leaderPhoneMap, onSavePhone, notificati
         <span className="eyebrow">Consolidation</span>
         <h1>Network Leaders</h1>
         <p className="lede">Every leader First Timers can be assigned to, with how many are still waiting on
-          follow-up. Send Notification lets you review the message, then sends a real SMS through Semaphore —
-          with delivery status reported back.</p>
+          follow-up. Send Notification lets you review the message, then sends a real, free SMS from
+          09305920971 — with delivery status reported back.</p>
       </div>
 
       <div className="screen-head">
@@ -474,8 +474,9 @@ function ConsolidationApp() {
     setLeaderPhoneMap(prev => ({ ...prev, [leaderId]: phone }));
   }
 
-  // Sends the SMS through Semaphore (via the backend) and logs it — throws if
-  // the API key isn't configured yet or Semaphore rejects the request, so the
+  // Sends the SMS through SMSGate — your own phone acting as a free SMS
+  // gateway (via the backend) — and logs it — throws if the device isn't
+  // configured yet or the phone is offline/rejects the request, so the
   // modal can show the real error instead of silently pretending it worked.
   async function handleSendNotification(leaderId, leaderName, phone, message) {
     const json = await apiPostC({ action:"sendNotification", leaderId, leaderName, phone, message });
