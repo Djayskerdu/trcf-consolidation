@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Loader2, RefreshCw, AlertCircle, ClipboardList,
-  Pencil, X, Phone, Filter, UserPlus2, Calendar, Users, Send
+  Pencil, X, Phone, Filter, UserPlus2, Calendar, Users, Send,
+  CheckCircle2, XCircle, Clock
 } from "lucide-react";
 
 // ── Consolidation (First Timer / VIP) backend — same ConsolidationBackend.gs
@@ -51,17 +52,6 @@ const ASSIGNABLE_LEADERS = NETWORKS.reduce((acc, n) => {
   if (n.girls) acc.push({ id:`${n.id}-Girls`, networkId:n.id, networkLabel:n.label, gender:"Girls", name:n.girls, phone:n.girlsPhone });
   return acc;
 }, []);
-
-// Builds an sms: link that opens the device's own messaging app with the
-// leader's number and a reminder message pre-filled — no SMS gateway or
-// backend needed, the consolidation team just taps Send on their phone.
-// iOS and Android expect a different separator before the body param.
-function smsHref(phone, message) {
-  const digits = String(phone || "").replace(/[^\d+]/g, "");
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-  const sep = isIOS ? "&" : "?";
-  return `sms:${digits}${sep}body=${encodeURIComponent(message)}`;
-}
 
 function buildReminderMessage(leader, pendingCount) {
   const who = pendingCount === 1 ? "1 First Timer" : `${pendingCount} First Timers`;
@@ -211,26 +201,54 @@ function FirstTimerModal({ open, onClose, onSave, initial, saving }) {
   );
 }
 
+function statusMeta(status) {
+  const s = String(status || "").toLowerCase();
+  if (s === "success" || s === "delivered" || s === "sent") return { icon: CheckCircle2, cls: "notif-ok", label: status };
+  if (s === "failed" || s === "invalid" || s === "expired") return { icon: XCircle, cls: "notif-bad", label: status };
+  return { icon: Clock, cls: "notif-pending", label: status || "Pending" };
+}
+
+function formatDateTime(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleString("en-PH", { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" });
+}
+
 function NotifyModal({ open, onClose, leader, pending, phone, saving, error, onSavePhone, onSend }) {
   const [phoneDraft, setPhoneDraft] = useState("");
   const [messageDraft, setMessageDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState("");
+  const [sendResult, setSendResult] = useState(null);
 
   useEffect(() => {
     if (!open || !leader) return;
     setPhoneDraft(phone || "");
     setMessageDraft(buildReminderMessage(leader, pending));
+    setSendError(""); setSendResult(null);
   }, [open, leader, pending, phone]);
 
   if (!open || !leader) return null;
-  const canSend = !!phoneDraft.trim() && !!messageDraft.trim() && !saving;
+  const canSend = !!phoneDraft.trim() && !!messageDraft.trim() && !saving && !sending;
 
   async function handleSend() {
     if (!canSend) return;
-    if (phoneDraft.trim() !== String(phone||"").trim()) {
-      await onSavePhone(phoneDraft.trim());
+    setSending(true); setSendError("");
+    try {
+      if (phoneDraft.trim() !== String(phone||"").trim()) {
+        await onSavePhone(phoneDraft.trim());
+      }
+      const notif = await onSend(phoneDraft.trim(), messageDraft);
+      setSendResult(notif);
+    } catch (err) {
+      setSendError(err.message || "Couldn't send this message — please try again.");
+    } finally {
+      setSending(false);
     }
-    onSend(phoneDraft.trim(), messageDraft);
   }
+
+  const meta = sendResult ? statusMeta(sendResult.Status) : null;
 
   return (
     <div className="overlay" onMouseDown={e=>{if(e.target===e.currentTarget) onClose();}}>
@@ -241,40 +259,60 @@ function NotifyModal({ open, onClose, leader, pending, phone, saving, error, onS
         </div>
         <div className="modal-body">
           <div className="sub" style={{marginTop:-6}}>To {leader.name} · {leader.networkLabel}</div>
-          {!phone && (
-            <div className="error-box" style={{marginBottom:0}}>
-              <Phone size={14}/>No number on file yet — add one below before sending.
+
+          {sendResult ? (
+            <div className={`notif-result ${meta.cls}`}>
+              <meta.icon size={18}/>
+              <div>
+                <div className="notif-result-status">Sent via Semaphore — status: {meta.label}</div>
+                <div className="notif-result-sub">{sendResult.Network ? `${sendResult.Network} · ` : ""}{formatDateTime(sendResult.SentAt)}</div>
+              </div>
             </div>
+          ) : (
+            <>
+              {!phone && (
+                <div className="error-box" style={{marginBottom:0}}>
+                  <Phone size={14}/>No number on file yet — add one below before sending.
+                </div>
+              )}
+              {(error || sendError) && (
+                <div className="error-box" style={{marginBottom:0}}>
+                  <AlertCircle size={14}/>{sendError || error}
+                </div>
+              )}
+              <label className="field"><span>Mobile number</span>
+                <input type="text" value={phoneDraft} onChange={e=>setPhoneDraft(e.target.value)} placeholder="09XXXXXXXXX"/>
+              </label>
+              <label className="field"><span>Message</span>
+                <textarea rows={5} value={messageDraft} onChange={e=>setMessageDraft(e.target.value)}
+                  style={{fontFamily:"inherit",fontSize:14,padding:"10px 12px",border:"1px solid var(--line)",borderRadius:8,background:"var(--paper)",color:"var(--ink)",resize:"vertical"}}/>
+              </label>
+            </>
           )}
-          {error && (
-            <div className="error-box" style={{marginBottom:0}}>
-              <AlertCircle size={14}/>{error}
-            </div>
-          )}
-          <label className="field"><span>Mobile number</span>
-            <input type="text" value={phoneDraft} onChange={e=>setPhoneDraft(e.target.value)} placeholder="09XXXXXXXXX"/>
-          </label>
-          <label className="field"><span>Message</span>
-            <textarea rows={5} value={messageDraft} onChange={e=>setMessageDraft(e.target.value)}
-              style={{fontFamily:"inherit",fontSize:14,padding:"10px 12px",border:"1px solid var(--line)",borderRadius:8,background:"var(--paper)",color:"var(--ink)",resize:"vertical"}}/>
-          </label>
         </div>
         <div className="modal-foot">
-          <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn-primary" disabled={!canSend} onClick={handleSend}>
-            <Send size={14}/>{saving ? "Saving number…" : "Open messaging app"}
-          </button>
+          {sendResult ? (
+            <button type="button" className="btn-primary" onClick={onClose}>Done</button>
+          ) : (
+            <>
+              <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+              <button type="button" className="btn-primary" disabled={!canSend} onClick={handleSend}>
+                <Send size={14}/>{sending ? "Sending…" : saving ? "Saving number…" : "Send SMS now"}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function NetworkLeadersScreen({ records, leaderPhoneMap, onSavePhone }) {
+function NetworkLeadersScreen({ records, leaderPhoneMap, onSavePhone, notifications, onSendNotification, onRefreshStatus }) {
   const [sortBy, setSortBy] = useState("pending"); // "pending" | "name" | "network"
   const [notifyTarget, setNotifyTarget] = useState(null); // leader row currently in the modal
   const [phoneSaveError, setPhoneSaveError] = useState("");
   const [savingPhone, setSavingPhone] = useState(false);
+  const [refreshingId, setRefreshingId] = useState(null);
 
   function phoneFor(l) {
     return (leaderPhoneMap[l.id] || l.phone || "").trim();
@@ -292,10 +330,24 @@ function NetworkLeadersScreen({ records, leaderPhoneMap, onSavePhone }) {
     }
   }
 
-  function handleSend(phone, message) {
-    window.location.href = smsHref(phone, message);
-    setNotifyTarget(null);
+  async function handleSend(phone, message) {
+    return onSendNotification(notifyTarget.id, notifyTarget.name, phone, message);
   }
+
+  async function handleRefresh(notifId) {
+    setRefreshingId(notifId);
+    try { await onRefreshStatus(notifId); } catch { /* surfaced via unchanged status */ }
+    finally { setRefreshingId(null); }
+  }
+
+  const latestByLeader = useMemo(() => {
+    const map = {};
+    (notifications || []).forEach(n => {
+      const prev = map[n.LeaderId];
+      if (!prev || String(n.SentAt) > String(prev.SentAt)) map[n.LeaderId] = n;
+    });
+    return map;
+  }, [notifications]);
 
   const leaderRows = useMemo(() => {
     return ASSIGNABLE_LEADERS.map(l => {
@@ -315,8 +367,8 @@ function NetworkLeadersScreen({ records, leaderPhoneMap, onSavePhone }) {
         <span className="eyebrow">Consolidation</span>
         <h1>Network Leaders</h1>
         <p className="lede">Every leader First Timers can be assigned to, with how many are still waiting on
-          follow-up. Send Notification lets you review and edit the message first, then opens your phone's
-          messaging app with it ready to send — just tap Send.</p>
+          follow-up. Send Notification lets you review the message, then sends a real SMS through Semaphore —
+          with delivery status reported back.</p>
       </div>
 
       <div className="screen-head">
@@ -334,6 +386,8 @@ function NetworkLeadersScreen({ records, leaderPhoneMap, onSavePhone }) {
         {leaderRows.map(l => {
           const phone = phoneFor(l);
           const hasPhone = !!phone;
+          const lastNotif = latestByLeader[l.id];
+          const meta = lastNotif ? statusMeta(lastNotif.Status) : null;
           return (
             <div key={l.id} className="leader-card">
               <div className="leader-main">
@@ -351,6 +405,15 @@ function NetworkLeadersScreen({ records, leaderPhoneMap, onSavePhone }) {
                   <strong>{l.total}</strong> assigned total ·{" "}
                   <strong className={l.pending>0 ? "leader-pending" : ""}>{l.pending}</strong> waiting on follow-up
                 </div>
+                {lastNotif && (
+                  <div className={`notif-line ${meta.cls}`}>
+                    <meta.icon size={12}/>
+                    <span>Last notified {formatDateTime(lastNotif.SentAt)} — {meta.label}</span>
+                    <button type="button" className="notif-refresh" onClick={()=>handleRefresh(lastNotif.ID)} disabled={refreshingId===lastNotif.ID}>
+                      {refreshingId===lastNotif.ID ? "Checking…" : "Check status"}
+                    </button>
+                  </div>
+                )}
               </div>
               <div className="ft-actions">
                 <button type="button" className="btn-primary" onClick={()=>setNotifyTarget(l)}>
@@ -381,6 +444,7 @@ function ConsolidationApp() {
   const [view, setView] = useState("firsttimers"); // "firsttimers" | "leaders"
   const [records, setRecords] = useState([]);
   const [leaderPhoneMap, setLeaderPhoneMap] = useState({}); // leaderId -> phone, from the Leaders sheet
+  const [notifications, setNotifications] = useState([]); // log of sent SMS notifications, from the Notifications sheet
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
@@ -398,6 +462,7 @@ function ConsolidationApp() {
       const map = {};
       (data.leaders || []).forEach(l => { if (l.Phone) map[l.ID] = String(l.Phone); });
       setLeaderPhoneMap(map);
+      setNotifications(data.notifications || []);
     }
     catch { setError("Couldn't load First Timer records. Check the Consolidation script URL is set."); }
     finally { setLoading(false); }
@@ -407,6 +472,21 @@ function ConsolidationApp() {
   async function handleSavePhone(leaderId, phone) {
     await apiPostC({ action:"updateLeaderPhone", id:leaderId, phone });
     setLeaderPhoneMap(prev => ({ ...prev, [leaderId]: phone }));
+  }
+
+  // Sends the SMS through Semaphore (via the backend) and logs it — throws if
+  // the API key isn't configured yet or Semaphore rejects the request, so the
+  // modal can show the real error instead of silently pretending it worked.
+  async function handleSendNotification(leaderId, leaderName, phone, message) {
+    const json = await apiPostC({ action:"sendNotification", leaderId, leaderName, phone, message });
+    setNotifications(prev => [...prev, json.notification]);
+    return json.notification;
+  }
+
+  async function handleRefreshStatus(notifId) {
+    const json = await apiPostC({ action:"refreshNotificationStatus", notifId });
+    setNotifications(prev => prev.map(n => String(n.ID)===String(notifId) ? { ...n, Status: json.status } : n));
+    return json.status;
   }
 
   const notConfigured = CONSOLIDATION_SCRIPT_URL.indexOf("PASTE_YOUR") === 0;
@@ -469,7 +549,8 @@ function ConsolidationApp() {
 
           <main className="main">
             {view==="leaders" ? (
-              <NetworkLeadersScreen records={records} leaderPhoneMap={leaderPhoneMap} onSavePhone={handleSavePhone}/>
+              <NetworkLeadersScreen records={records} leaderPhoneMap={leaderPhoneMap} onSavePhone={handleSavePhone}
+                notifications={notifications} onSendNotification={handleSendNotification} onRefreshStatus={handleRefreshStatus}/>
             ) : notConfigured ? (
               <div className="home-wrap">
                 <div className="home-hero">
@@ -847,4 +928,20 @@ body{background:var(--paper);color:var(--ink);font-family:-apple-system,BlinkMac
 .leader-nophone{font-style:italic;}
 .leader-pending{color:var(--amber);}
 .btn-disabled{opacity:.45;pointer-events:none;cursor:not-allowed;}
+
+.notif-line{display:flex;align-items:center;gap:6px;font-size:12px;margin-top:2px;}
+.notif-line span{flex:1;}
+.notif-ok{color:var(--green);}
+.notif-bad{color:var(--danger);}
+.notif-pending{color:var(--faint);}
+.notif-refresh{background:none;border:none;font-size:11.5px;font-weight:700;color:var(--navy);cursor:pointer;padding:0;text-decoration:underline;font-family:inherit;flex:none;}
+.notif-refresh:disabled{opacity:.5;cursor:default;}
+
+.notif-result{display:flex;align-items:flex-start;gap:10px;border-radius:10px;padding:14px 16px;font-size:13px;}
+.notif-result svg{flex-shrink:0;margin-top:1px;}
+.notif-result-status{font-weight:700;margin-bottom:2px;}
+.notif-result-sub{color:var(--faint);font-size:12.5px;}
+.notif-result.notif-ok{background:#E6F4ED;color:var(--green);}
+.notif-result.notif-bad{background:#F8E9E5;color:var(--danger);}
+.notif-result.notif-pending{background:#F1ECDF;color:var(--faint);}
 `;

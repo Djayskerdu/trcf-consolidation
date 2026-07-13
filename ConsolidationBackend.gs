@@ -17,6 +17,16 @@
 
 var SHEET_NAME = "FirstTimers";
 var LEADERS_SHEET_NAME = "Leaders";
+var NOTIF_SHEET_NAME = "Notifications";
+
+// ── Semaphore SMS API (https://semaphore.co) — sends real SMS to PH numbers
+// and reports back delivery status. Sign up at semaphore.co, copy your API
+// key from the dashboard, and paste it below. Leave SEMAPHORE_SENDER_NAME
+// blank to send under Semaphore's shared default name until you register
+// your own custom sender name in their dashboard.
+var SEMAPHORE_API_KEY = "491adbfaa174c76c4772008c171d7d6c";
+var SEMAPHORE_SENDER_NAME = "";
+var SEMAPHORE_BASE = "https://api.semaphore.co/api/v4";
 
 var COLUMNS = [
   "ID","Name","ContactNumber","Address","Age","Gender","MaritalStatus",
@@ -25,6 +35,11 @@ var COLUMNS = [
 ];
 
 var LEADER_COLUMNS = ["ID","Name","NetworkId","NetworkLabel","Gender","Phone"];
+
+var NOTIF_COLUMNS = [
+  "ID","LeaderId","LeaderName","Phone","Message",
+  "SemaphoreMessageId","Status","Network","SentAt"
+];
 
 // Same leaders as ASSIGNABLE_LEADERS in src/App.jsx — IDs must match exactly
 // ("<networkId>-Boys" / "<networkId>-Girls") so a phone saved here lines up
@@ -56,6 +71,19 @@ function setup() {
     sheet.setFrozenRows(1);
   }
   setupLeaders_();
+  setupNotifications_();
+}
+
+function setupNotifications_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(NOTIF_SHEET_NAME);
+  if (!sheet) sheet = ss.insertSheet(NOTIF_SHEET_NAME);
+  if (sheet.getLastRow() === 0) {
+    sheet.getRange(1, 1, 1, NOTIF_COLUMNS.length).setValues([NOTIF_COLUMNS]);
+    sheet.getRange(1, 1, 1, NOTIF_COLUMNS.length).setFontWeight("bold").setBackground("#1F2A44").setFontColor("#FFFFFF");
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
 }
 
 function setupLeaders_() {
@@ -115,6 +143,98 @@ function updateLeaderPhone_(id, phone) {
   return { success: false, error: "Leader not found" };
 }
 
+function getNotificationsSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(NOTIF_SHEET_NAME);
+  if (!sheet) sheet = setupNotifications_();
+  return sheet;
+}
+
+function readNotifications_() {
+  var sheet = getNotificationsSheet_();
+  var values = sheet.getDataRange().getValues();
+  var headers = values[0];
+  var rows = [];
+  for (var i = 1; i < values.length; i++) {
+    var row = values[i];
+    if (!row[0]) continue;
+    var rec = {};
+    headers.forEach(function (h, j) { rec[h] = row[j]; });
+    rows.push(rec);
+  }
+  return rows;
+}
+
+// Sends one SMS through Semaphore and returns its raw API response object
+// (contains message_id, status, network, etc.) — throws if the API key isn't
+// configured or Semaphore returns an error.
+function sendSemaphoreSms_(number, message) {
+  if (!SEMAPHORE_API_KEY || SEMAPHORE_API_KEY.indexOf("PASTE_YOUR") === 0) {
+    throw new Error("Semaphore API key isn't configured yet — paste it into SEMAPHORE_API_KEY in ConsolidationBackend.gs");
+  }
+  var payload = { apikey: SEMAPHORE_API_KEY, number: number, message: message };
+  if (SEMAPHORE_SENDER_NAME) payload.sendername = SEMAPHORE_SENDER_NAME;
+  var res = UrlFetchApp.fetch(SEMAPHORE_BASE + "/messages", {
+    method: "post",
+    payload: payload,
+    muteHttpExceptions: true
+  });
+  var code = res.getResponseCode();
+  var body = JSON.parse(res.getContentText());
+  if (code >= 300) {
+    var msg = (body && (body.message || JSON.stringify(body))) || ("Semaphore returned HTTP " + code);
+    throw new Error(msg);
+  }
+  return Array.isArray(body) ? body[0] : body;
+}
+
+function sendNotification_(body) {
+  var leaderId = body.leaderId, leaderName = body.leaderName, phone = body.phone, message = body.message;
+  if (!phone) return { success: false, error: "No phone number provided" };
+  if (!message) return { success: false, error: "Message is empty" };
+
+  var result = sendSemaphoreSms_(phone, message);
+  var sheet = getNotificationsSheet_();
+  var id = String(Date.now());
+  var sentAt = new Date().toISOString();
+  var entry = {
+    ID: id, LeaderId: leaderId, LeaderName: leaderName, Phone: phone, Message: message,
+    SemaphoreMessageId: result.message_id || "", Status: result.status || "Pending",
+    Network: result.network || "", SentAt: sentAt
+  };
+  var row = NOTIF_COLUMNS.map(function (c) { return entry[c]; });
+  sheet.appendRow(row);
+  return { success: true, notification: entry };
+}
+
+// Re-queries Semaphore for a single message's current status (Pending →
+// Sent/Delivered/Failed) and updates the logged row in the Notifications
+// sheet to match.
+function refreshNotificationStatus_(notifId) {
+  var sheet = getNotificationsSheet_();
+  var values = sheet.getDataRange().getValues();
+  var headers = values[0];
+  var idCol = headers.indexOf("ID");
+  var msgIdCol = headers.indexOf("SemaphoreMessageId");
+  var statusCol = headers.indexOf("Status");
+  for (var i = 1; i < values.length; i++) {
+    if (String(values[i][idCol]) === String(notifId)) {
+      var messageId = values[i][msgIdCol];
+      if (!messageId) return { success: false, error: "No Semaphore message id logged for this notification" };
+      var res = UrlFetchApp.fetch(
+        SEMAPHORE_BASE + "/messages/" + messageId + "?apikey=" + encodeURIComponent(SEMAPHORE_API_KEY),
+        { method: "get", muteHttpExceptions: true }
+      );
+      var body = JSON.parse(res.getContentText());
+      var msg = Array.isArray(body) ? body[0] : body;
+      var status = (msg && msg.status) || "Unknown";
+      sheet.getRange(i + 1, statusCol + 1).setValue(status);
+      return { success: true, status: status };
+    }
+  }
+  return { success: false, error: "Notification not found" };
+}
+
 function doGet(e) {
   try {
     var sheet = getSheet_();
@@ -129,7 +249,8 @@ function doGet(e) {
       records.push(rec);
     }
     var leaders = readLeaders_();
-    return jsonOut_({ success: true, data: { records: records, leaders: leaders } });
+    var notifications = readNotifications_();
+    return jsonOut_({ success: true, data: { records: records, leaders: leaders, notifications: notifications } });
   } catch (err) {
     return jsonOut_({ success: false, error: String(err) });
   }
@@ -143,6 +264,8 @@ function doPost(e) {
     if (action === "updateRecord") return jsonOut_(updateRecord_(body.id, body.record));
     if (action === "deleteRecord") return jsonOut_(deleteRecord_(body.id));
     if (action === "updateLeaderPhone") return jsonOut_(updateLeaderPhone_(body.id, body.phone));
+    if (action === "sendNotification") return jsonOut_(sendNotification_(body));
+    if (action === "refreshNotificationStatus") return jsonOut_(refreshNotificationStatus_(body.notifId));
     return jsonOut_({ success: false, error: "Unknown action" });
   } catch (err) {
     return jsonOut_({ success: false, error: String(err) });
