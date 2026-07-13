@@ -61,6 +61,13 @@ function buildReminderMessage(leader, pendingCount) {
   return `Hi ${leader.name}! This is TRCF CONSOLIDATION TEAM checking in — just a reminder to keep following up with your assigned First Timers. Thank you! 🙏`;
 }
 
+// Default welcome/thank-you SMS sent to a First Timer or VIP after their
+// visit is logged. Editable in the modal before sending, same as reminders.
+function buildWelcomeMessage(record) {
+  const firstName = String(record.Name || "").trim().split(/\s+/)[0] || "there";
+  return `Hi ${firstName}! Thank you so much for visiting TRCF — it was truly a blessing having you with us! We'd love to see you again soon and help you get connected. God bless you! — TRCF CONSOLIDATION TEAM 🙏`;
+}
+
 // Leader phone numbers now live in the "Leaders" tab of the Consolidation
 // Google Sheet (see ConsolidationBackend.gs), keyed by the same "<networkId>-
 // <Gender>" id used in ASSIGNABLE_LEADERS — so a number saved from any device
@@ -307,6 +314,100 @@ function NotifyModal({ open, onClose, leader, pending, phone, saving, error, onS
   );
 }
 
+// Same shape as NotifyModal, but for sending a one-off welcome / thank-you
+// SMS to a First Timer or VIP rather than a reminder to a network leader.
+function WelcomeModal({ open, onClose, record, saving, onSaveContact, onSend }) {
+  const [phoneDraft, setPhoneDraft] = useState("");
+  const [messageDraft, setMessageDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState("");
+  const [sendResult, setSendResult] = useState(null);
+
+  useEffect(() => {
+    if (!open || !record) return;
+    setPhoneDraft(record.ContactNumber || "");
+    setMessageDraft(buildWelcomeMessage(record));
+    setSendError(""); setSendResult(null);
+  }, [open, record]);
+
+  if (!open || !record) return null;
+  const canSend = !!phoneDraft.trim() && !!messageDraft.trim() && !saving && !sending;
+
+  async function handleSend() {
+    if (!canSend) return;
+    setSending(true); setSendError("");
+    try {
+      if (phoneDraft.trim() !== String(record.ContactNumber || "").trim()) {
+        await onSaveContact(phoneDraft.trim());
+      }
+      const notif = await onSend(phoneDraft.trim(), messageDraft);
+      setSendResult(notif);
+    } catch (err) {
+      setSendError(err.message || "Couldn't send this message — please try again.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const meta = sendResult ? statusMeta(sendResult.Status) : null;
+
+  return (
+    <div className="overlay" onMouseDown={e=>{if(e.target===e.currentTarget) onClose();}}>
+      <div className="modal">
+        <div className="modal-head">
+          <h2>Send welcome message</h2>
+          <button type="button" className="icon-btn" onClick={onClose}><X size={18}/></button>
+        </div>
+        <div className="modal-body">
+          <div className="sub" style={{marginTop:-6}}>To {record.Name}</div>
+
+          {sendResult ? (
+            <div className={`notif-result ${meta.cls}`}>
+              <meta.icon size={18}/>
+              <div>
+                <div className="notif-result-status">Sent from 09305920971 — status: {meta.label}</div>
+                <div className="notif-result-sub">{formatDateTime(sendResult.SentAt)}</div>
+              </div>
+            </div>
+          ) : (
+            <>
+              {!record.ContactNumber && (
+                <div className="error-box" style={{marginBottom:0}}>
+                  <Phone size={14}/>No number on file yet — add one below before sending.
+                </div>
+              )}
+              {sendError && (
+                <div className="error-box" style={{marginBottom:0}}>
+                  <AlertCircle size={14}/>{sendError}
+                </div>
+              )}
+              <label className="field"><span>Mobile number</span>
+                <input type="text" value={phoneDraft} onChange={e=>setPhoneDraft(e.target.value)} placeholder="09XXXXXXXXX"/>
+              </label>
+              <label className="field"><span>Message</span>
+                <textarea rows={5} value={messageDraft} onChange={e=>setMessageDraft(e.target.value)}
+                  style={{fontFamily:"inherit",fontSize:14,padding:"10px 12px",border:"1px solid var(--line)",borderRadius:8,background:"var(--paper)",color:"var(--ink)",resize:"vertical"}}/>
+              </label>
+            </>
+          )}
+        </div>
+        <div className="modal-foot">
+          {sendResult ? (
+            <button type="button" className="btn-primary" onClick={onClose}>Done</button>
+          ) : (
+            <>
+              <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
+              <button type="button" className="btn-primary" disabled={!canSend} onClick={handleSend}>
+                <Send size={14}/>{sending ? "Sending…" : saving ? "Saving number…" : "Send SMS now"}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NetworkLeadersScreen({ records, leaderPhoneMap, onSavePhone, notifications, onSendNotification, onRefreshStatus }) {
   const [sortBy, setSortBy] = useState("pending"); // "pending" | "name" | "network"
   const [notifyTarget, setNotifyTarget] = useState(null); // leader row currently in the modal
@@ -453,6 +554,8 @@ function ConsolidationApp() {
   const [filterStatus, setFilterStatus] = useState("All");
   const [filterNetwork, setFilterNetwork] = useState("All");
   const [filterDate, setFilterDate] = useState("");
+  const [welcomeTarget, setWelcomeTarget] = useState(null);
+  const [savingContact, setSavingContact] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -525,6 +628,16 @@ function ConsolidationApp() {
     setRecords(prev => prev.map(r => r.ID===record.ID ? { ...r, FollowUpStatus:status } : r));
     try { await apiPostC({ action:"updateRecord", id:record.ID, record:{ FollowUpStatus:status } }); }
     catch { setError("Couldn't update status — please refresh and try again."); }
+  }
+
+  // Saves an edited contact number back onto the FirstTimers row (used from
+  // the welcome-message modal when the number on file was missing/wrong).
+  async function handleSaveContactNumber(id, phone) {
+    setSavingContact(true);
+    try {
+      await apiPostC({ action:"updateRecord", id, record:{ ContactNumber:phone } });
+      setRecords(prev => prev.map(r => r.ID===id ? { ...r, ContactNumber:phone } : r));
+    } finally { setSavingContact(false); }
   }
 
   return (
@@ -640,6 +753,7 @@ function ConsolidationApp() {
                           <select className="status-select" value={r.FollowUpStatus} onChange={e=>handleStatusChange(r, e.target.value)}>
                             {FOLLOWUP_STATUSES.map(s=><option key={s}>{s}</option>)}
                           </select>
+                          <button className="icon-btn" title="Send welcome / thank-you SMS" onClick={()=>setWelcomeTarget(r)}><Send size={14}/></button>
                           <button className="icon-btn" onClick={()=>{setEditing(r);setModalOpen(true);}}><Pencil size={14}/></button>
                         </div>
                       </div>
@@ -649,6 +763,10 @@ function ConsolidationApp() {
 
                 <FirstTimerModal open={modalOpen} initial={editing} saving={saving}
                   onClose={()=>{if(!saving){setModalOpen(false);setEditing(null);}}} onSave={handleSave}/>
+                <WelcomeModal open={!!welcomeTarget} record={welcomeTarget} saving={savingContact}
+                  onClose={()=>setWelcomeTarget(null)}
+                  onSaveContact={(phone)=>handleSaveContactNumber(welcomeTarget.ID, phone)}
+                  onSend={(phone,message)=>handleSendNotification(welcomeTarget.ID, welcomeTarget.Name, phone, message)}/>
               </div>
             )}
           </main>
