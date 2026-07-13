@@ -231,7 +231,7 @@ function NotifyModal({ open, onClose, leader, pending, phone, saving, error, onS
 
   useEffect(() => {
     if (!open || !leader) return;
-    setPhoneDraft(phone || "");
+    setPhoneDraft(String(phone || ""));
     setMessageDraft(buildReminderMessage(leader, pending));
     setSendError(""); setSendResult(null);
   }, [open, leader, pending, phone]);
@@ -325,7 +325,7 @@ function WelcomeModal({ open, onClose, record, saving, onSaveContact, onSend }) 
 
   useEffect(() => {
     if (!open || !record) return;
-    setPhoneDraft(record.ContactNumber || "");
+    setPhoneDraft(String(record.ContactNumber || ""));
     setMessageDraft(buildWelcomeMessage(record));
     setSendError(""); setSendResult(null);
   }, [open, record]);
@@ -416,7 +416,7 @@ function NetworkLeadersScreen({ records, leaderPhoneMap, onSavePhone, notificati
   const [refreshingId, setRefreshingId] = useState(null);
 
   function phoneFor(l) {
-    return (leaderPhoneMap[l.id] || l.phone || "").trim();
+    return String(leaderPhoneMap[l.id] || l.phone || "").trim();
   }
 
   async function handleSavePhone(leaderId, phone) {
