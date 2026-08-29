@@ -48,8 +48,8 @@ const NETWORKS = [
 ];
 
 const ASSIGNABLE_LEADERS = NETWORKS.reduce((acc, n) => {
-  if (n.boys)  acc.push({ id:`${n.id}-Men`,  networkId:n.id, networkLabel:n.label, gender:"Men",  name:n.Men,  phone:n.boysPhone  });
-  if (n.girls) acc.push({ id:`${n.id}-Women`, networkId:n.id, networkLabel:n.label, gender:"Women", name:n.Women, phone:n.girlsPhone });
+  if (n.Men)  acc.push({ id:`${n.id}-Men`,  networkId:n.id, networkLabel:n.label, gender:"Men",  name:n.Men,  phone:n.boysPhone  });
+  if (n.Women) acc.push({ id:`${n.id}-Women`, networkId:n.id, networkLabel:n.label, gender:"Women", name:n.Women, phone:n.girlsPhone });
   return acc;
 }, []);
 
