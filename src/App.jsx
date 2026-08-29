@@ -2,13 +2,21 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Loader2, RefreshCw, AlertCircle, ClipboardList,
   Pencil, X, Phone, Filter, UserPlus2, Calendar, Users, Send,
-  CheckCircle2, XCircle, Clock
+  CheckCircle2, XCircle, Clock, LogOut, Lock
 } from "lucide-react";
 
 // ── Consolidation (First Timer / VIP) backend — same ConsolidationBackend.gs
 //    Web App URL used by the Pastors' Overview dashboard, so records logged
 //    here immediately show up there too.
 const CONSOLIDATION_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwxnFrOjZJ1bg4_BgkmY7QttrZKGT1GTojtcqqZ9REJGEtT8q3XwQRTqinGgyz9MrM/exec";
+
+// ── Access gate ──────────────────────────────────────────────────────
+// This is NOT real security — the backend Web App still accepts requests
+// from anyone who has its URL. It's just a shared passcode so the link
+// isn't usable by a random person who stumbles on it. Change this to
+// something your team agrees on, and change it again if it ever leaks.
+const TEAM_PASSCODE = "trcf@2026!";
+const AUTH_STORAGE_KEY = "trcf@2026!";
 
 const FOLLOWUP_STATUSES = ["Not Yet Contacted","Contacted","Invited to Cell","Attending Cell","Inactive"];
 const DECISIONS = ["Accepted Christ","Rededication","Just Visiting","Follow Up Needed"];
@@ -29,6 +37,40 @@ async function apiPostC(body) {
   if (!json.success) throw new Error(json.error || "Request failed");
   return json;
 }
+
+function LoginScreen({ onLogin }) {
+  const [name, setName] = useState("");
+  const [passcode, setPasscode] = useState("");
+  const [error, setError] = useState("");
+
+  function submit(e) {
+    e.preventDefault();
+    if (!name.trim()) { setError("Please enter your name."); return; }
+    if (passcode !== TEAM_PASSCODE) { setError("Incorrect passcode — check with your team lead."); return; }
+    setError("");
+    onLogin(name.trim());
+  }
+
+  return (
+    <div className="login-wrap">
+      <style>{CSS}</style>
+      <form className="login-card" onSubmit={submit}>
+        <div className="login-mark"><Lock size={18}/></div>
+        <h1>Consolidation System</h1>
+        <p className="lede">Sign in with your name and the team passcode to log First Timers &amp; VIPs.</p>
+        {error && <div className="error-box"><AlertCircle size={14}/>{error}</div>}
+        <label className="field"><span>Your name</span>
+          <input type="text" value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Joan Patal" autoFocus/>
+        </label>
+        <label className="field"><span>Team passcode</span>
+          <input type="password" value={passcode} onChange={e=>setPasscode(e.target.value)} placeholder="••••••••"/>
+        </label>
+        <button type="submit" className="btn-primary" style={{justifyContent:"center"}}>Enter</button>
+      </form>
+    </div>
+  );
+}
+
 
 // ── Networks & leaders First Timers get assigned to for follow-up ──────
 // Fill in each leader's mobile number (PH format e.g. "09171234567") to enable
@@ -98,11 +140,11 @@ function formatDate(value) {
   return `${MONTHS[parseInt(m, 10) - 1]} ${parseInt(day, 10)}, ${y}`;
 }
 
-function FirstTimerModal({ open, onClose, onSave, initial, saving }) {
+function FirstTimerModal({ open, onClose, onSave, initial, saving, defaultEncoder }) {
   const blank = () => ({
     Name:"", ContactNumber:"", Address:"", Age:"", Gender:"", MaritalStatus:"",
     DateVisited:"", InvitedBy:"", Decision:"", AssignedLeaderKey:"",
-    FollowUpStatus:"Not Yet Contacted", Notes:"", EncodedBy:"",
+    FollowUpStatus:"Not Yet Contacted", Notes:"", EncodedBy:defaultEncoder || "",
   });
   const [form, setForm] = useState(blank());
 
@@ -541,7 +583,7 @@ function NetworkLeadersScreen({ records, leaderPhoneMap, onSavePhone, notificati
   );
 }
 
-function ConsolidationApp() {
+function ConsolidationApp({ currentUser, onLogout }) {
   const [view, setView] = useState("firsttimers"); // "firsttimers" | "leaders"
   const [records, setRecords] = useState([]);
   const [leaderPhoneMap, setLeaderPhoneMap] = useState({}); // leaderId -> phone, from the Leaders sheet
@@ -658,6 +700,8 @@ function ConsolidationApp() {
                 <Users size={14}/>Network Leaders
               </button>
               <button className="icon-btn" onClick={load} title="Refresh"><RefreshCw size={15} className={loading?"spin":""}/></button>
+              <span className="current-user" title="Signed in">{currentUser}</span>
+              <button className="icon-btn" onClick={onLogout} title="Sign out"><LogOut size={15}/></button>
             </div>
           </header>
 
@@ -761,7 +805,7 @@ function ConsolidationApp() {
                   </div>
                 )}
 
-                <FirstTimerModal open={modalOpen} initial={editing} saving={saving}
+                <FirstTimerModal open={modalOpen} initial={editing} saving={saving} defaultEncoder={currentUser}
                   onClose={()=>{if(!saving){setModalOpen(false);setEditing(null);}}} onSave={handleSave}/>
                 <WelcomeModal open={!!welcomeTarget} record={welcomeTarget} saving={savingContact}
                   onClose={()=>setWelcomeTarget(null)}
@@ -777,7 +821,21 @@ function ConsolidationApp() {
 }
 
 export default function App() {
-  return <ConsolidationApp/>;
+  const [currentUser, setCurrentUser] = useState(() => {
+    try { return localStorage.getItem(AUTH_STORAGE_KEY) || null; } catch { return null; }
+  });
+
+  function handleLogin(name) {
+    try { localStorage.setItem(AUTH_STORAGE_KEY, name); } catch { /* ignore storage errors */ }
+    setCurrentUser(name);
+  }
+  function handleLogout() {
+    try { localStorage.removeItem(AUTH_STORAGE_KEY); } catch { /* ignore storage errors */ }
+    setCurrentUser(null);
+  }
+
+  if (!currentUser) return <LoginScreen onLogin={handleLogin}/>;
+  return <ConsolidationApp currentUser={currentUser} onLogout={handleLogout}/>;
 }
 
 const CSS = `
@@ -939,6 +997,14 @@ body{background:var(--paper);color:var(--ink);font-family:-apple-system,BlinkMac
 
 .icon-btn{display:inline-flex;align-items:center;justify-content:center;background:none;border:none;color:var(--faint);cursor:pointer;padding:6px;border-radius:6px;}
 .icon-btn:hover{background:#F1ECDF;color:var(--ink);}
+.current-user{font-size:12.5px;font-weight:700;color:var(--faint);padding:0 2px;white-space:nowrap;}
+
+/* ── Login screen ────────────────────────────────────────────────── */
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:var(--paper);}
+.login-card{width:100%;max-width:360px;background:var(--raised);border:1px solid var(--line);border-radius:18px;padding:32px 28px;display:flex;flex-direction:column;gap:14px;box-shadow:0 20px 60px rgba(0,0,0,.08);}
+.login-mark{width:38px;height:38px;border-radius:10px;background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:center;margin-bottom:2px;}
+.login-card h1{font-size:22px;font-weight:700;}
+.login-card .lede{font-size:13.5px;color:var(--faint);line-height:1.5;margin-bottom:4px;}
 
 .resize-btn{width:auto;gap:5px;padding:6px 10px;border:1px solid var(--line);}
 .resize-btn-label{font-size:11px;font-weight:700;}
