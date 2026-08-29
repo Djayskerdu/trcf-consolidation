@@ -35,21 +35,21 @@ async function apiPostC(body) {
 // the "Send Notification" SMS button on the Network Leaders tab. Leave blank
 // to leave that button disabled until a number is added.
 const NETWORKS = [
-  { id:"abraham",  label:"Abraham Network",     boys:"Deonie Abraham",     boysPhone:"",  girls:"Elva Abraham",   girlsPhone:"" },
-  { id:"claudio",  label:"Claudio Network",     boys:"Sonny Claudio",      boysPhone:"",  girls:"",               girlsPhone:"" },
-  { id:"flores",   label:"Flores Network",      boys:"Franklin Flores",    boysPhone:"",  girls:"",               girlsPhone:"" },
-  { id:"imeepatal",label:"Patal Network (Imee)",boys:"",                   boysPhone:"",  girls:"Imee Patal",     girlsPhone:"" },
-  { id:"jacaria",  label:"Jacaria Network",     boys:"Anthony Jacaria",    boysPhone:"",  girls:"",               girlsPhone:"" },
-  { id:"jayabraham",label:"Jay Abraham Network",boys:"Jay Abraham",        boysPhone:"",  girls:"",               girlsPhone:"" },
-  { id:"jotoy",    label:"Jotoy Network",       boys:"Emerson P. Patal",   boysPhone:"",  girls:"Joan Z. Patal",  girlsPhone:"" },
-  { id:"laparan",  label:"Laparan Network",     boys:"",                   boysPhone:"",  girls:"Avril Lee Laparan", girlsPhone:"" },
-  { id:"pendon",   label:"Pendon Network",      boys:"Richard Pendon",     boysPhone:"",  girls:"Joy Pendon",     girlsPhone:"" },
-  { id:"rodemio",  label:"Rodemio Network",     boys:"Jaime Rodemio",      boysPhone:"",  girls:"Ledelyn Rodemio",girlsPhone:"" },
+  { id:"abraham",  label:"Abraham Network",     Men:"Deonie Abraham",     boysPhone:"",  Women:"Elva Abraham",   girlsPhone:"" },
+  { id:"claudio",  label:"Claudio Network",     Men:"Sonny Claudio",      boysPhone:"",  Women:"",               girlsPhone:"" },
+  { id:"flores",   label:"Flores Network",      Men:"Franklin Flores",    boysPhone:"",  Women:"",               girlsPhone:"" },
+  { id:"imeepatal",label:"Patal Network (Imee)",Men:"",                   boysPhone:"",  Women:"Imee Patal",     girlsPhone:"" },
+  { id:"jacaria",  label:"Jacaria Network",     Men:"Anthony Jacaria",    boysPhone:"",  Women:"",               girlsPhone:"" },
+  { id:"jayabraham",label:"Jay Abraham Network",Men:"Jay Abraham",        boysPhone:"",  Women:"",               girlsPhone:"" },
+  { id:"jotoy",    label:"Jotoy Network",       Men:"Emerson P. Patal",   boysPhone:"",  Women:"Joan Z. Patal",  girlsPhone:"" },
+  { id:"laparan",  label:"Laparan Network",     Men:"",                   boysPhone:"",  Women:"Avril Lee Laparan", girlsPhone:"" },
+  { id:"pendon",   label:"Pendon Network",      Men:"Richard Pendon",     boysPhone:"",  Women:"Joy Pendon",     girlsPhone:"" },
+  { id:"rodemio",  label:"Rodemio Network",     Men:"Jaime Rodemio",      boysPhone:"",  Women:"Ledelyn Rodemio",girlsPhone:"" },
 ];
 
 const ASSIGNABLE_LEADERS = NETWORKS.reduce((acc, n) => {
-  if (n.boys)  acc.push({ id:`${n.id}-Boys`,  networkId:n.id, networkLabel:n.label, gender:"Boys",  name:n.boys,  phone:n.boysPhone  });
-  if (n.girls) acc.push({ id:`${n.id}-Girls`, networkId:n.id, networkLabel:n.label, gender:"Girls", name:n.girls, phone:n.girlsPhone });
+  if (n.boys)  acc.push({ id:`${n.id}-Men`,  networkId:n.id, networkLabel:n.label, gender:"Men",  name:n.Men,  phone:n.boysPhone  });
+  if (n.girls) acc.push({ id:`${n.id}-Women`, networkId:n.id, networkLabel:n.label, gender:"Women", name:n.Women, phone:n.girlsPhone });
   return acc;
 }, []);
 
